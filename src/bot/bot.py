@@ -1,7 +1,7 @@
 import asyncio
-import logging
 import sys
-from config import TELEGRAM_BOT_API_KEY
+
+from settings.config import config
 
 
 from aiogram import Bot, Dispatcher, html, types
@@ -10,8 +10,13 @@ from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
+from src.bot import commands, quiz
 
 dp = Dispatcher()
+
+dp.include_router(commands.router)
+dp.include_router(quiz.router)
+
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
@@ -27,7 +32,7 @@ async def send_welcome(message: types.Message):
 
 
 async def main() -> None:
-    bot = Bot(token=TELEGRAM_BOT_API_KEY)
+    bot = Bot(token= config.pa)
     await dp.start_polling(bot)
 
 

@@ -1,0 +1,13 @@
+
+[flake 8]
+extend-ignore = E203
+max-line-lenght = 120
+exclude = 
+    .git,
+    __pycache__,
+    docs/source/cof.py,
+    old,
+    build,
+    dist
+max-complecity = 10
+ignore = D100, D103
