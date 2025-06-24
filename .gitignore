@@ -183,8 +183,18 @@ cython_debug/
 task.txt
 myenv/
 __pycache__/
+__pycache__ 
+*.log
+chat_session.db
+*.sqlite3
 
 env/
 
 - env
 env
+
+__pycache__/
+*.log
+chat_session.db
+test/
+test_db/
