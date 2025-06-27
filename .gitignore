@@ -198,3 +198,12 @@ __pycache__/
 chat_session.db
 test/
 test_db/
+
+__pycache__/
+*.pyc
+*.pyo
+*.log
+logs/
+storage/chat_sessions.db
+.env
+myenv/
