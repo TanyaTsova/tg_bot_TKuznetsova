@@ -1,15 +1,16 @@
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
+from aiogram import F, Router
 from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
-from src.bot.states import QuizStates
-from src.bot.keyboards import get_quiz_action_keyboard, get_main_menu_button
-from src.bot.resource_loader import load_prompt
-from services.chatgpt.open_ai_client import OpenAIClient
+from services.open_ai_client import OpenAIClient
 from settings.config import config
-from aiogram.filters import Command
+from src.bot.keyboards import get_main_menu_button, get_quiz_action_keyboard
+from src.bot.resource_loader import load_prompt
+from src.bot.states import QuizStates
+
 router = Router()
+
 
 @router.message(F.text.in_({"quiz_prog", "quiz_math", "quiz_biology", "quiz_more"}))
 async def start_quiz(message: Message, state: FSMContext):
@@ -17,6 +18,7 @@ async def start_quiz(message: Message, state: FSMContext):
     await state.update_data(topic=topic)
     await state.set_state(QuizStates.asking_question)
     await ask_question(message, state)
+
 
 async def ask_question(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -30,14 +32,17 @@ async def ask_question(message: Message, state: FSMContext):
     openai_client = OpenAIClient(
         openai_api_key=config.openai_api_token,
         model=config.openai_model,
-        temperature=config.openai_model_temperature
+        temperature=config.openai_model_temperature,
     )
 
     question = await openai_client.take_task(user_message=topic, system_prompt=prompt)
     await state.update_data(current_question=question)
     await state.set_state(QuizStates.answering_question)
 
-    await message.answer(f"❓ Питання: {question}", reply_markup=get_quiz_action_keyboard())
+    await message.answer(
+        f"❓ Питання: {question}", reply_markup=get_quiz_action_keyboard()
+    )
+
 
 @router.message(QuizStates.answering_question)
 async def answer_question(message: Message, state: FSMContext):
@@ -51,10 +56,12 @@ async def answer_question(message: Message, state: FSMContext):
     openai_client = OpenAIClient(
         openai_api_key=config.openai_api_token,
         model=config.openai_model,
-        temperature=config.openai_model_temperature
+        temperature=config.openai_model_temperature,
     )
 
-    evaluation = await openai_client.take_task(user_message=check_prompt, system_prompt=prompt)
+    evaluation = await openai_client.take_task(
+        user_message=check_prompt, system_prompt=prompt
+    )
 
     correct = "Правильно!" in evaluation
     correct_count = data.get("correct_count", 0)
@@ -68,8 +75,11 @@ async def answer_question(message: Message, state: FSMContext):
     await state.update_data(correct_count=correct_count, wrong_count=wrong_count)
 
     await message.answer(evaluation, parse_mode=ParseMode.HTML)
-    await message.answer(f"✅ Правильних: {correct_count} | ❌ Неправильних: {wrong_count}")
+    await message.answer(
+        f"✅ Правильних: {correct_count} | ❌ Неправильних: {wrong_count}"
+    )
     await message.answer("Оберіть дію:", reply_markup=get_quiz_action_keyboard())
+
 
 @router.message(F.text == "Ще одне питання ➡")
 async def more_question(message: Message, state: FSMContext):
@@ -77,10 +87,12 @@ async def more_question(message: Message, state: FSMContext):
     await state.set_state(QuizStates.asking_question)
     await ask_question(message, state)
 
+
 @router.message(F.text == "Змінити тему 📚")
 async def change_topic(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Виберіть тему знову. /start або /menu")
+
 
 @router.message(F.text == "Завершити квіз 🔥")
 async def end_quiz(message: Message, state: FSMContext):
@@ -92,4 +104,6 @@ async def end_quiz(message: Message, state: FSMContext):
     await message.answer(summary)
 
     await state.clear()
-    await message.answer("Поверніться до головного меню:", reply_markup=get_main_menu_button())
+    await message.answer(
+        "Поверніться до головного меню:", reply_markup=get_main_menu_button()
+    )

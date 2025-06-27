@@ -1,23 +1,24 @@
-from aiogram import Router, types, F
-from aiogram.types import FSInputFile, CallbackQuery, Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from aiogram.fsm.state import StatesGroup, State
-
 import html
 
-from src.bot.keyboards import get_main_menu_button, get_talk_keyboard, get_quiz_action_keyboard
-from src.bot.message_sender import send_html_message, send_image_bytes, show_menu
-from src.bot.resource_loader import load_message, load_image, load_menu, load_prompt
-from src.bot.states import TalkStates, QuizStates
-from src.db.repository import GptSessionRepository
-from src.db.enums import SessionMode
-from services.chatgpt.open_ai_client import OpenAIClient
+from aiogram import F, Router, types
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (CallbackQuery, Message)
+
+from services.open_ai_client import OpenAIClient
 from settings.config import config
-from .quiz import ask_question
+from src.bot.keyboards import (get_main_menu_button, get_talk_keyboard)
+from src.bot.message_sender import (send_html_message, send_image_bytes, show_menu)
+from src.bot.resource_loader import (load_image, load_menu, load_message, load_prompt)
+from src.bot.states import TalkStates
+from src.db.enums import SessionMode
+from src.db.repository import GptSessionRepository
+
 
 router = Router()
+
 
 class GptStates(StatesGroup):
     waiting_for_question = State()
@@ -26,21 +27,21 @@ class GptStates(StatesGroup):
 @router.message(Command("menu"))
 async def back_to_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    text = await load_message('main')
-    image_bytes = await load_image('main')
-    menu_commands = await load_menu('main')
+    text = await load_message("main")
+    image_bytes = await load_image("main")
+    menu_commands = await load_menu("main")
 
     await send_image_bytes(message=message, image_bytes=image_bytes)
     await send_html_message(message=message, text=text)
     await show_menu(bot=message.bot, chat_id=message.chat.id, commands=menu_commands)
 
 
-@router.message(Command('start'))
+@router.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
-    text = await load_message('main')
-    image_bytes = await load_image('main')
-    menu_commands = await load_menu('main')
+    text = await load_message("main")
+    image_bytes = await load_image("main")
+    menu_commands = await load_menu("main")
 
     await send_image_bytes(message=message, image_bytes=image_bytes)
     await send_html_message(message=message, text=text)
@@ -51,13 +52,15 @@ async def start(message: types.Message, state: FSMContext):
 async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
-    text = await load_message('main')
-    image_bytes = await load_image('main')
-    menu_commands = await load_menu('main')
+    text = await load_message("main")
+    image_bytes = await load_image("main")
+    menu_commands = await load_menu("main")
 
     await send_image_bytes(message=callback.message, image_bytes=image_bytes)
     await send_html_message(message=callback.message, text=text)
-    await show_menu(bot=callback.bot, chat_id=callback.message.chat.id, commands=menu_commands)
+    await show_menu(
+        bot=callback.bot, chat_id=callback.message.chat.id, commands=menu_commands
+    )
 
 
 @router.message(Command("random"))
@@ -65,20 +68,24 @@ async def random(
     message: types.Message,
     state: FSMContext,
     openai_client: OpenAIClient,
-    session_repository: GptSessionRepository
+    session_repository: GptSessionRepository,
 ):
     user_id = message.from_user.id
     prompt = await load_prompt("random")
     intro = await load_message("random")
     image_bytes = await load_image("random")
 
-    session_id = await session_repository.get_or_create_session(user_id, SessionMode.RANDOM)
+    session_id = await session_repository.get_or_create_session(
+        user_id, SessionMode.RANDOM
+    )
     system_prompt = prompt
     user_input = "Give me a random interesting technical fact."
 
     await session_repository.add_message(session_id, role="user", content=user_input)
 
-    reply = await openai_client.take_task(user_message=user_input, system_prompt=system_prompt)
+    reply = await openai_client.take_task(
+        user_message=user_input, system_prompt=system_prompt
+    )
     await session_repository.add_message(session_id, role="system", content=reply)
 
     combined = f"{intro}\n\n{reply}"
@@ -89,7 +96,7 @@ async def random(
     await message.answer(
         text="Use the button below to return to the main menu:",
         reply_markup=get_main_menu_button(),
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -105,18 +112,22 @@ async def gpt_reply(
     message: types.Message,
     state: FSMContext,
     openai_client: OpenAIClient,
-    session_repository: GptSessionRepository
+    session_repository: GptSessionRepository,
 ):
     await send_html_message(message, "⏳ Обробляю запит...")
 
     user_id = message.from_user.id
-    session_id = await session_repository.get_or_create_session(user_id, SessionMode.GPT)
+    session_id = await session_repository.get_or_create_session(
+        user_id, SessionMode.GPT
+    )
 
     user_text = message.text.strip()
     await session_repository.add_message(session_id, role="user", content=user_text)
 
     system_prompt = await load_prompt("gpt")
-    reply = await openai_client.take_task(user_message=user_text, system_prompt=system_prompt)
+    reply = await openai_client.take_task(
+        user_message=user_text, system_prompt=system_prompt
+    )
     await session_repository.add_message(session_id, role="system", content=reply)
 
     await send_html_message(message, reply)
@@ -127,8 +138,8 @@ async def talk_to_figure(message: Message, state: FSMContext):
     await state.set_state(TalkStates.figure)
     text = await load_message("talk")
     image_bytes = await load_image("talk")
-    persons_list = ['cobain', 'hawking', 'nietzsche', 'queen', 'tolkien']
-    persons_text = 'Введіть особистість: ' + ', '.join(persons_list)
+    persons_list = ["cobain", "hawking", "nietzsche", "queen", "tolkien"]
+    persons_text = "Введіть особистість: " + ", ".join(persons_list)
     await send_image_bytes(message=message, image_bytes=image_bytes)
     await send_html_message(message=message, text=text)
     await send_html_message(message=message, text=persons_text)
@@ -150,13 +161,15 @@ async def set_figure(message: Message, state: FSMContext):
 
     image_name = f"talk_{figure}"
     image_bytes = await load_image(image_name)
-    
-    text = 'Задай своє запитання: '
+
+    text = "Задай своє запитання: "
     await send_image_bytes(message=message, image_bytes=image_bytes)
     await send_html_message(message=message, text=text)
 
 
-async def send_long_message(message: types.Message, text: str, parse_mode: str = ParseMode.HTML):
+async def send_long_message(
+    message: types.Message, text: str, parse_mode: str = ParseMode.HTML
+):
     MAX_LENGTH = 4096
     for i in range(0, len(text), MAX_LENGTH):
         chunk = text[i:i + MAX_LENGTH]
@@ -168,7 +181,7 @@ async def talk(
     message: Message,
     state: FSMContext,
     openai_client: OpenAIClient,
-    session_repository: GptSessionRepository
+    session_repository: GptSessionRepository,
 ):
     user_id = message.from_user.id
     user_message = message.text.strip().lower()
@@ -177,25 +190,35 @@ async def talk(
     system_prompt = data.get("system_prompt")
     figure = data.get("figure")
 
-    session_id = await session_repository.get_or_create_session(user_id, SessionMode.TALK)
-    await session_repository.add_message(session_id, role='user', content=user_message)
+    if figure:
+        print(f"Retrieved figure data: {figure}")
 
-    gpt_response = await openai_client.take_task(user_message, system_prompt=system_prompt)
-    await session_repository.add_message(session_id, role='system', content=gpt_response)
+    session_id = await session_repository.get_or_create_session(
+        user_id, SessionMode.TALK
+    )
+    await session_repository.add_message(session_id, role="user", content=user_message)
 
-    await send_long_message(message, html.escape(gpt_response), parse_mode=ParseMode.HTML)
+    gpt_response = await openai_client.take_task(
+        user_message, system_prompt=system_prompt
+    )
+    await session_repository.add_message(
+        session_id, role="system", content=gpt_response
+    )
+
+    await send_long_message(
+        message, html.escape(gpt_response), parse_mode=ParseMode.HTML
+    )
 
     keyboard = await get_talk_keyboard()
     await message.answer(
-        text=await load_message("talk_next_action"),
-        reply_markup=keyboard
+        text=await load_message("talk_next_action"), reply_markup=keyboard
     )
 
 
 @router.callback_query(F.data == "talk_end")
 async def end_talk(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_reply_markup() 
+    await callback.message.edit_reply_markup()
     await callback.message.answer(await load_message("talk_stop"))
     await callback.answer()
 
@@ -203,7 +226,6 @@ async def end_talk(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "talk_continue")
 async def talk_continue(callback: CallbackQuery):
     await callback.answer("Напишіть наступне повідомлення для продовження розмови.")
-
 
 
 @router.message(Command("quiz"))
@@ -215,19 +237,9 @@ async def handle_quiz_command(message: Message, state: FSMContext):
         "`quiz_math` – Теорія алгоритмів / множин / матаналіз\n"
         "`quiz_biology` – Біологія\n\n"
         "Просто надішли одну з цих команд.",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
     )
 
-# @router.message(F.text.in_(["quiz_prog", "quiz_math", "quiz_biology"]))
-# async def quiz_entry(message: Message, state: FSMContext):
-#     topic_map = {
-#         "quiz_prog": "Питання на тему програмування мовою Python",
-#         "quiz_math": "Питання на тему математичних теорій",
-#         "quiz_biology": "Питання на тему біології"
-#     }
-#     topic = topic_map.get(message.text.strip(), "quiz_prog")
-#     await state.update_data(topic=topic)
-#     await ask_question(message, state)ы
 
 @router.message(Command("quiz"))
 async def quiz_entry(message: Message, state: FSMContext):
@@ -238,5 +250,5 @@ async def quiz_entry(message: Message, state: FSMContext):
         "`quiz_math` – Математика\n"
         "`quiz_biology` – Біологія\n\n"
         "Надішліть одне з ключових слів.",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
     )
