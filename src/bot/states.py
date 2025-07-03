@@ -8,5 +8,6 @@ class TalkStates(StatesGroup):
 
 
 class QuizStates(StatesGroup):
+    choosing_topic = State()
     asking_question = State()
     answering_question = State()

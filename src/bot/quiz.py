@@ -1,109 +1,149 @@
-from aiogram import F, Router
-from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
 
+from aiogram import Router, F
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message, CallbackQuery, FSInputFile
+
+from src.bot.keyboards import get_topic_keyboard, get_quiz_action_keyboard
 from services.open_ai_client import OpenAIClient
 from settings.config import config
-from src.bot.keyboards import get_main_menu_button, get_quiz_action_keyboard
-from src.bot.resource_loader import load_prompt
-from src.bot.states import QuizStates
 
 router = Router()
 
 
-@router.message(F.text.in_({"quiz_prog", "quiz_math", "quiz_biology", "quiz_more"}))
+class QuizStates(StatesGroup):
+    choosing_topic = State()
+    answering_question = State()
+
+
+def create_openai_client() -> OpenAIClient:
+    return OpenAIClient(
+        openai_api_key=config.openai_api_token,
+        model=config.openai_model,
+        temperature=config.openai_model_temperature
+    )
+
+
+@router.message(Command("quiz"))
 async def start_quiz(message: Message, state: FSMContext):
-    topic = message.text.strip()
+    await state.clear()
+    image_path = config.path_to_images / 'quiz.jpg'
+
+    if image_path.exists():
+        photo = FSInputFile(str(image_path))
+        await message.answer_photo(
+            photo,
+            caption="Обери тему квізу:",
+            reply_markup=get_topic_keyboard()
+        )
+    else:
+        await message.answer("Обери тему квізу:", reply_markup=get_topic_keyboard())
+
+    await state.set_state(QuizStates.choosing_topic)
+
+
+@router.callback_query(F.data.in_(["quiz_prog", "quiz_math", "quiz_biology"]))
+async def select_topic(callback: CallbackQuery, state: FSMContext):
+    topic_map = {
+        "quiz_prog": "Програмування на Python",
+        "quiz_math": "Математика",
+        "quiz_biology": "Біологія"
+    }
+    topic = topic_map[callback.data]
     await state.update_data(topic=topic)
-    await state.set_state(QuizStates.asking_question)
-    await ask_question(message, state)
+    await callback.answer()
+    await ask_question(callback.message, state)
 
 
 async def ask_question(message: Message, state: FSMContext):
     data = await state.get_data()
     topic = data.get("topic")
 
-    if topic != "quiz_more":
-        await state.update_data(correct_count=0, wrong_count=0)
+    # Підставляємо ключове слово, яке GPT розуміє
+    topic_triggers = {
+        "Програмування на Python": "quiz_prog",
+        "Математика": "quiz_math",
+        "Біологія": "quiz_biology"
+    }
+    trigger = topic_triggers.get(topic, "quiz_prog")
 
-    prompt = await load_prompt("quiz")
+    openai_client = create_openai_client()
+    prompt_path = config.path_to_prompts / 'quiz.txt'
 
-    openai_client = OpenAIClient(
-        openai_api_key=config.openai_api_token,
-        model=config.openai_model,
-        temperature=config.openai_model_temperature,
+    if not prompt_path.exists():
+        await message.answer("⚠️ Не знайдено файл промпту для квізу.")
+        return
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    question = await openai_client.take_task(
+        user_message=trigger,  # <-- відправляємо ключ, а не фразу
+        system_prompt=prompt
     )
 
-    question = await openai_client.take_task(user_message=topic, system_prompt=prompt)
+    if not question:
+        await message.answer("⚠️ Не вдалося згенерувати питання. Спробуйте ще раз.")
+        return
+
     await state.update_data(current_question=question)
+    await message.answer(f"❓ {question}")
     await state.set_state(QuizStates.answering_question)
-
-    await message.answer(
-        f"❓ Питання: {question}", reply_markup=get_quiz_action_keyboard()
-    )
 
 
 @router.message(QuizStates.answering_question)
-async def answer_question(message: Message, state: FSMContext):
-    user_answer = message.text.strip().lower()
+async def check_answer(message: Message, state: FSMContext):
+    user_answer = message.text.strip()
     data = await state.get_data()
     topic = data.get("topic")
+    current_question = data.get("current_question")
 
-    prompt = await load_prompt("quiz")
-    check_prompt = f"{prompt}\n\n{topic}\n\nПитання: {data['current_question']}\nВідповідь: {user_answer}"
+    openai_client = create_openai_client()
+    prompt_path = config.path_to_prompts / 'quiz.txt'
 
-    openai_client = OpenAIClient(
-        openai_api_key=config.openai_api_token,
-        model=config.openai_model,
-        temperature=config.openai_model_temperature,
+    if not prompt_path.exists():
+        await message.answer("⚠️ Не знайдено файл промпту для перевірки.")
+        return
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    check_prompt = (
+        f"{prompt}\n"
+        f"Тема: {topic}\n"
+        f"Питання: {current_question}\n"
+        f"Відповідь користувача: {user_answer}\n"
+        f"Оціни відповідь. Напиши чи вона правильна і чому. Потім задай нове питання по темі."
     )
 
-    evaluation = await openai_client.take_task(
-        user_message=check_prompt, system_prompt=prompt
+    result = await openai_client.take_task(
+        user_message=check_prompt,
+        system_prompt=prompt
     )
 
-    correct = "Правильно!" in evaluation
-    correct_count = data.get("correct_count", 0)
-    wrong_count = data.get("wrong_count", 0)
+    if not result:
+        await message.answer("⚠️ Не вдалося перевірити відповідь.")
+        return
 
-    if correct:
-        correct_count += 1
-    else:
-        wrong_count += 1
-
-    await state.update_data(correct_count=correct_count, wrong_count=wrong_count)
-
-    await message.answer(evaluation, parse_mode=ParseMode.HTML)
-    await message.answer(
-        f"✅ Правильних: {correct_count} | ❌ Неправильних: {wrong_count}"
-    )
-    await message.answer("Оберіть дію:", reply_markup=get_quiz_action_keyboard())
+    await message.answer(result, parse_mode=ParseMode.HTML, reply_markup=get_quiz_action_keyboard())
 
 
-@router.message(F.text == "Ще одне питання ➡")
-async def more_question(message: Message, state: FSMContext):
-    await state.update_data(topic="quiz_more")
-    await state.set_state(QuizStates.asking_question)
-    await ask_question(message, state)
+@router.callback_query(F.data == "quiz_next")
+async def handle_quiz_next(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await ask_question(callback.message, state)
 
 
-@router.message(F.text == "Змінити тему 📚")
-async def change_topic(message: Message, state: FSMContext):
+@router.callback_query(F.data == "quiz_change_topic")
+async def handle_quiz_change_topic(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await message.answer("Виберіть тему знову. /start або /menu")
+    await callback.answer()
+    await callback.message.answer("Обери тему квізу:", reply_markup=get_topic_keyboard())
+    await state.set_state(QuizStates.choosing_topic)
 
 
-@router.message(F.text == "Завершити квіз 🔥")
-async def end_quiz(message: Message, state: FSMContext):
-    data = await state.get_data()
-    correct = data.get("correct_count", 0)
-    wrong = data.get("wrong_count", 0)
-
-    summary = f"🏁 Квіз завершено!\n\n✅ Правильних відповідей: {correct}\n❌ Неправильних: {wrong}"
-    await message.answer(summary)
-
+@router.callback_query(F.data == "quiz_end")
+async def handle_quiz_end(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "Поверніться до головного меню:", reply_markup=get_main_menu_button()
-    )
+    await callback.answer()
+    await callback.message.answer("Квіз завершено. Дякую за участь!")

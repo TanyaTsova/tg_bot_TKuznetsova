@@ -1,5 +1,6 @@
 from openai import AsyncOpenAI, OpenAIError
-from openai import (APIConnectionError,AuthenticationError, RateLimitError, APITimeoutError, APIError)
+from openai import (APIConnectionError, AuthenticationError, RateLimitError)
+import asyncio
 
 from settings.logging_config import get_logger
 
@@ -31,7 +32,7 @@ class OpenAIClient:
             logger.info(f"[GPT RESPONSE]\n{reply}")
             return reply
 
-        except Timeout as e:
+        except asyncio.TimeoutError as e:
             logger.error(f"[GPT TIMEOUT] Час очікування вичерпано: {e}")
 
         except AuthenticationError as e:

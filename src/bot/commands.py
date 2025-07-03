@@ -15,6 +15,8 @@ from src.bot.resource_loader import (load_image, load_menu, load_message, load_p
 from src.bot.states import TalkStates
 from src.db.enums import SessionMode
 from src.db.repository import GptSessionRepository
+from src.bot.keyboards import get_topic_keyboard
+from aiogram.types import FSInputFile
 
 
 router = Router()
@@ -231,24 +233,14 @@ async def talk_continue(callback: CallbackQuery):
 @router.message(Command("quiz"))
 async def handle_quiz_command(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "Обери тему квізу:\n\n"
-        "`quiz_prog` – Програмування на Python\n"
-        "`quiz_math` – Теорія алгоритмів / множин / матаналіз\n"
-        "`quiz_biology` – Біологія\n\n"
-        "Просто надішли одну з цих команд.",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    image_path = config.path_to_images / 'quiz.jpg'
 
-
-@router.message(Command("quiz"))
-async def quiz_entry(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Оберіть тему квізу:\n"
-        "`quiz_prog` – Програмування\n"
-        "`quiz_math` – Математика\n"
-        "`quiz_biology` – Біологія\n\n"
-        "Надішліть одне з ключових слів.",
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    if image_path.exists():
+        photo = FSInputFile(str(image_path))
+        await message.answer_photo(
+            photo,
+            caption="Обери тему квізу:",
+            reply_markup=get_topic_keyboard()
+        )
+    else:
+        await message.answer("Обери тему квізу:", reply_markup=get_topic_keyboard())
